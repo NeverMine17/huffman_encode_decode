@@ -1,31 +1,28 @@
 /*************************************************************************
  > File Name: h_dec.cpp
- > Created Time: 2017年11月04日 星期六 23时37分54秒
+ > Created Time: 2017-11-04 23:37:54
  ************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <ctype.h>
-#include <errno.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cerrno>
+#include <new>
 
 struct node {
     int b;
     struct node *l, *r;
 } g_head = {
-    -1,
+        -1,
 };
 
 
-static inline int bits(int d, int j, int k)
-{
-    return (d>>j)&~(~0<<k); 
+static inline int bits(int d, int j, int k) {
+    return (d >> j) & ~(~0 << k);
 }
 
 
-int construct_huffman_tree(FILE *fin)
-{
+int construct_huffman_tree(FILE *fin) {
     int tree_size;
     unsigned char buf[6];
     int d;
@@ -36,10 +33,12 @@ int construct_huffman_tree(FILE *fin)
     int len;
 
     fread(&tree_size, 1, sizeof(tree_size), fin);
-    assert(tree_size%6==0);
+    if (tree_size % 6 != 0) {
+        printf("tree_size mod 6 != 0");
+    }
 
     while (tree_size) {
-        len = fread(buf, 1, 6, fin);
+        len = static_cast<int>(fread(buf, 1, 6, fin));
         if (len != 6) {
             // printf("fread return %d\n", len);
             break;
@@ -48,16 +47,21 @@ int construct_huffman_tree(FILE *fin)
 
         d = buf[0];
         bits_count = buf[1];
-        code = *(int*)(buf+2);
+        code = *(int *) (buf + 2);
 
         x = &g_head;
-        for (int i = bits_count-1; i>=0; --i) {
+        for (int i = bits_count - 1; i >= 0; --i) {
             b = bits(code, i, 1);
             ppn = b ? &x->r : &x->l;
             if (!*ppn) {
-                *ppn = (struct node*)malloc(sizeof(struct node));
-                (*ppn)->l = NULL;
-                (*ppn)->r = NULL;
+                try {
+                    *ppn = new node;
+                } catch (std::bad_alloc &a) {
+                    printf("%s", a.what());
+                    exit(EXIT_FAILURE);
+                }
+                (*ppn)->l = nullptr;
+                (*ppn)->r = nullptr;
                 (*ppn)->b = -1;
             }
             x = *ppn;
@@ -68,8 +72,7 @@ int construct_huffman_tree(FILE *fin)
     return 0;
 }
 
-int restore_byte(char* buf, int &pos, int max_pos)
-{
+int restore_byte(char *buf, int &pos, int max_pos) {
     int b;
     int p_bytes;
     int p_bits;
@@ -79,32 +82,35 @@ int restore_byte(char* buf, int &pos, int max_pos)
     x = &g_head;
     for (;;) {
         if (pos == max_pos) {
-            pos =pos_bak;
+            pos = pos_bak;
             return -1;
         }
 
-        p_bytes = pos/8;
-        p_bits = 7-pos%8;
+        p_bytes = pos / 8;
+        p_bits = 7 - pos % 8;
         b = bits(buf[p_bytes], p_bits, 1);
         x = b ? x->r : x->l;
         ++pos;
-        if (x->r == NULL && x->l == NULL)
+        if (x == nullptr) {
+            printf("x == nullptr");
+            exit(EXIT_FAILURE);
+        }
+        if (x->r == nullptr and x->l == nullptr) {
             break;
-
+        }
     }
 
     return x->b;
 }
 
-int decode_huffman_file(FILE* fin, FILE* fout)
-{
+int decode_huffman_file(FILE *fin, FILE *fout) {
     int file_length;
-    int byte_count=0;
+    int byte_count = 0;
     char buf[10];
     const int total_byte = 10;
     int left_byte;
     int left_bits;
-    int len; 
+    size_t len;
     fread(&file_length, 1, sizeof(int), fin);
     printf("file_length:%d\n", file_length);
 
@@ -113,12 +119,12 @@ int decode_huffman_file(FILE* fin, FILE* fout)
     int pos = 0;
     left_byte = 0;
     for (;;) {
-        len = fread(buf+left_byte, 1, total_byte-left_byte, fin);
+        len = fread(buf + left_byte, 1, static_cast<size_t>(total_byte - left_byte), fin);
         if (len == 0) {
             break;
         }
 
-        max_pos =80;
+        max_pos = 80;
         for (;;) {
             byte = restore_byte(buf, pos, max_pos);
             if (byte >= 0) {
@@ -127,58 +133,57 @@ int decode_huffman_file(FILE* fin, FILE* fout)
                 byte_count++;
                 if (byte_count == file_length) {
                     printf("restore finished!\n");
-                    goto exit;
+                    return 0;
                 }
                 continue;
             }
-            assert(byte==-1);
+            if (byte != -1) {
+                printf("byte != -1");
+                exit(EXIT_FAILURE);
+            }
 
             left_bits = max_pos - pos;
             if (left_bits == 0) {
                 left_byte = 0;
                 pos = 0;
             } else {
-                left_byte = left_bits/8+1;
+                left_byte = left_bits / 8 + 1;
                 pos = 8 - left_bits % 8;
                 for (int i = 0; i < left_byte; ++i) {
-                    buf[i] = buf[total_byte-left_byte+i];
+                    buf[i] = buf[total_byte - left_byte + i];
                 }
             }
             break;
         }
     }
-
-
-exit:
     return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     if (argc != 2) {
         printf("Usage:%s enc_file\n", basename(argv[0]));
         return 0;
     }
 
-    char* ext = strrchr(argv[1], '.');
-    if (ext==NULL || strcmp(ext+1, "huf")) {
+    char *ext = strrchr(argv[1], '.');
+    if (ext == nullptr || strcmp(ext + 1, "huf") != 0) {
         printf("invalid arguments!\n");
         return -1;
     }
 
-    FILE* fin = fopen(argv[1], "r");
-    if (fin == NULL) {
+    FILE *fin = fopen(argv[1], "r");
+    if (fin == nullptr) {
         printf("fopen %s failed:%s\n", argv[1], strerror(errno));
         return -1;
     }
 
     char dec_file_name[100];
     strcpy(dec_file_name, basename(argv[1]));
-    strcpy(dec_file_name+strlen(dec_file_name)-3, "dec");
-    
+    strcpy(dec_file_name + strlen(dec_file_name) - 3, "dec");
 
-    FILE* fout = fopen(dec_file_name, "w");
-    if (fout == NULL) {
+
+    FILE *fout = fopen(dec_file_name, "w");
+    if (fout == nullptr) {
         printf("fopen %s failed:%s\n", dec_file_name, strerror(errno));
         return -1;
     }
